@@ -54,7 +54,7 @@ ast::TreePtr ASTUtil::dupType(const ast::TreePtr &orig) {
             }
             args.emplace_back(std::move(dupArg));
         }
-        return ast::MK::Send(send->loc, std::move(dupRecv), send->fun, std::move(args));
+        return ast::MK::Send(send->loc, std::move(dupRecv), send->fun, send->numPosArgs, std::move(args));
     }
 
     auto *ident = ast::cast_tree_const<ast::ConstantLit>(orig);

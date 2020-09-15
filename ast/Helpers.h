@@ -28,33 +28,33 @@ public:
         return Block(loc, std::move(body), std::move(args));
     }
 
-    static TreePtr Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, Send::ARGS_store args,
+    static TreePtr Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, u1 numPosArgs, Send::ARGS_store args,
                         Send::Flags flags = {}, TreePtr blk = nullptr) {
-        auto send = make_tree<ast::Send>(loc, std::move(recv), fun, std::move(args), std::move(blk), flags);
+        auto send = make_tree<ast::Send>(loc, std::move(recv), fun, numPosArgs, std::move(args), std::move(blk), flags);
         return send;
     }
 
     static TreePtr Send0(core::LocOffsets loc, TreePtr recv, core::NameRef fun) {
         Send::ARGS_store nargs;
-        return Send(loc, std::move(recv), fun, std::move(nargs));
+        return Send(loc, std::move(recv), fun, 0, std::move(nargs));
     }
 
     static TreePtr Send0Block(core::LocOffsets loc, TreePtr recv, core::NameRef fun, TreePtr blk) {
         Send::ARGS_store nargs;
-        return Send(loc, std::move(recv), fun, std::move(nargs), {}, std::move(blk));
+        return Send(loc, std::move(recv), fun, 0, std::move(nargs), {}, std::move(blk));
     }
 
     static TreePtr Send1(core::LocOffsets loc, TreePtr recv, core::NameRef fun, TreePtr arg1) {
         Send::ARGS_store nargs;
         nargs.emplace_back(std::move(arg1));
-        return Send(loc, std::move(recv), fun, std::move(nargs));
+        return Send(loc, std::move(recv), fun, 1, std::move(nargs));
     }
 
     static TreePtr Send2(core::LocOffsets loc, TreePtr recv, core::NameRef fun, TreePtr arg1, TreePtr arg2) {
         Send::ARGS_store nargs;
         nargs.emplace_back(std::move(arg1));
         nargs.emplace_back(std::move(arg2));
-        return Send(loc, std::move(recv), fun, std::move(nargs));
+        return Send(loc, std::move(recv), fun, 2, std::move(nargs));
     }
 
     static TreePtr Send3(core::LocOffsets loc, TreePtr recv, core::NameRef fun, TreePtr arg1, TreePtr arg2,
@@ -63,7 +63,7 @@ public:
         nargs.emplace_back(std::move(arg1));
         nargs.emplace_back(std::move(arg2));
         nargs.emplace_back(std::move(arg3));
-        return Send(loc, std::move(recv), fun, std::move(nargs));
+        return Send(loc, std::move(recv), fun, 3, std::move(nargs));
     }
 
     static TreePtr Literal(core::LocOffsets loc, const core::TypePtr &tpe) {
@@ -363,10 +363,11 @@ public:
         return Send1(loc, Self(loc), core::Names::super(), make_tree<ast::ZSuperArgs>(loc));
     }
 
-    static TreePtr SelfNew(core::LocOffsets loc, ast::Send::ARGS_store args, Send::Flags flags = {},
+    static TreePtr SelfNew(core::LocOffsets loc, int numPosArgs, ast::Send::ARGS_store args, Send::Flags flags = {},
                            TreePtr block = nullptr) {
         auto magic = Constant(loc, core::Symbols::Magic());
-        return Send(loc, std::move(magic), core::Names::selfNew(), std::move(args), flags, std::move(block));
+        return Send(loc, std::move(magic), core::Names::selfNew(), numPosArgs, std::move(args), flags,
+                    std::move(block));
     }
 
     static TreePtr DefineTopClassOrModule(core::LocOffsets loc, core::SymbolRef klass) {
@@ -377,7 +378,7 @@ public:
         flags.isRewriterSynthesized = true;
         // Use a 0-sized loc so that LSP queries for "what is at this location" do not return this synthetic send.
         return Send(core::LocOffsets{loc.beginLoc, loc.beginLoc}, std::move(magic),
-                    core::Names::defineTopClassOrModule(), std::move(args), flags);
+                    core::Names::defineTopClassOrModule(), 1, std::move(args), flags);
     }
 
     static TreePtr RaiseUnimplemented(core::LocOffsets loc) {

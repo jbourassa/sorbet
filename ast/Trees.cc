@@ -290,8 +290,10 @@ Assign::Assign(core::LocOffsets loc, TreePtr lhs, TreePtr rhs)
     _sanityCheck();
 }
 
-Send::Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, Send::ARGS_store args, TreePtr block, Flags flags)
-    : Expression(loc), fun(fun), flags(flags), recv(std::move(recv)), args(std::move(args)), block(std::move(block)) {
+Send::Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, u1 numPosArgs, Send::ARGS_store args, TreePtr block,
+           Flags flags)
+    : Expression(loc), fun(fun), flags(flags), numPosArgs(numPosArgs), recv(std::move(recv)), args(std::move(args)),
+      block(std::move(block)) {
     categoryCounterInc("trees", "send");
     if (block) {
         counterInc("trees.send.with_block");

@@ -1115,11 +1115,12 @@ ast::TreePtr SerializerImpl::unpickleExpr(serialize::UnPickler &p, const GlobalS
             if (blkt) {
                 blk.reset(static_cast<ast::Block *>(blkt.release()));
             }
+            auto numPosArgs = p.getU1();
             ast::Send::ARGS_store store(argsSize);
             for (auto &expr : store) {
                 expr = unpickleExpr(p, gs, file);
             }
-            return ast::MK::Send(loc, std::move(recv), fun, std::move(store), flags, std::move(blk));
+            return ast::MK::Send(loc, std::move(recv), fun, numPosArgs, std::move(store), flags, std::move(blk));
         }
         case 3: {
             auto argsSize = p.getU4();

@@ -700,14 +700,17 @@ public:
 
     Flags flags;
 
+    u1 numPosArgs;
+
     TreePtr recv;
 
     static constexpr int EXPECTED_ARGS_COUNT = 2;
     using ARGS_store = InlinedVector<TreePtr, EXPECTED_ARGS_COUNT>;
     ARGS_store args;
+
     TreePtr block; // null if no block passed
 
-    Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, ARGS_store args, TreePtr block = nullptr,
+    Send(core::LocOffsets loc, TreePtr recv, core::NameRef fun, u1 numPosArgs, ARGS_store args, TreePtr block = nullptr,
          Flags flags = {});
 
     TreePtr deepCopy() const;
@@ -715,6 +718,23 @@ public:
     virtual std::string toStringWithTabs(const core::GlobalState &gs, int tabs = 0) const;
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0);
     virtual std::string nodeName();
+
+    bool hasKwArgs() const {
+      return numPosArgs < args.size();
+    }
+
+    // The last argument is a keyword splat if the keyword arguments portion of the send args are of odd length.
+    bool hasKwSplat() const {
+      return (args.size() - numPosArgs) & 0x1;
+    }
+
+    std::optional<int> kwArgsOffset() const {
+      if (hasKwArgs()) {
+        return std::make_optional(numPosArgs);
+      } else {
+        return std::nullopt;
+      }
+    }
 
 private:
     virtual void _sanityCheck();

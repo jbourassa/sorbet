@@ -223,7 +223,8 @@ TreePtr desugarDString(DesugarContext dctx, core::LocOffsets loc, parser::NodeVe
         return mergeStrings(dctx, loc, std::move(stringsAccumulated));
     } else {
         auto recv = MK::Constant(loc, core::Symbols::Magic());
-        return MK::Send(loc, std::move(recv), core::Names::stringInterpolate(), std::move(interpArgs));
+        return MK::Send(loc, std::move(recv), core::Names::stringInterpolate(), interpArgs.size(),
+                        std::move(interpArgs));
     }
 }
 
@@ -425,6 +426,7 @@ ClassDef::RHS_store scopeNodeToBody(DesugarContext dctx, unique_ptr<parser::Node
 struct OpAsgnScaffolding {
     core::NameRef temporaryName;
     InsSeq::STATS_store statementBody;
+    u1 numPosArgs;
     Send::ARGS_store readArgs;
     Send::ARGS_store assgnArgs;
 };
@@ -471,7 +473,7 @@ OpAsgnScaffolding copyArgsForOpAsgn(DesugarContext dctx, Send *s) {
         assgnArgs.emplace_back(MK::Local(argLoc, name));
     }
 
-    return {tempRecv, std::move(stats), std::move(readArgs), std::move(assgnArgs)};
+    return {tempRecv, std::move(stats), s->numPosArgs, std::move(readArgs), std::move(assgnArgs)};
 }
 
 // while true
@@ -508,6 +510,30 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     rec = MK::Self(loc.copyWithZeroLength());
                     flags.isPrivateOk = true;
                 }
+
+                int numPosArgs = send->args.size();
+                if (numPosArgs > 0) {
+                    // Deconstruct the kwargs hash in the last argument if it's present.
+                    if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
+                        numPosArgs -= 1;
+
+                        auto node = std::move(send->args.back());
+                        send->args.pop_back();
+
+                        // inline the hash into the
+                        for (auto &entry : hash->pairs) {
+                            typecase(
+                                entry.get(),
+                                [&](parser::Pair *pair) {
+                                    send->args.emplace_back(std::move(pair->key));
+                                    send->args.emplace_back(std::move(pair->value));
+                                },
+                                [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
+                                [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                        }
+                    }
+                }
+
                 if (absl::c_any_of(send->args, [](auto &arg) { return parser::isa_node<parser::Splat>(arg.get()); })) {
                     // If we have a splat anywhere in the argument list, desugar
                     // the argument list as a single Array node, and then
@@ -533,21 +559,22 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     Send::ARGS_store sendargs;
                     sendargs.emplace_back(std::move(rec));
                     sendargs.emplace_back(std::move(method));
+                    sendargs.emplace_back(MK::Int(loc, numPosArgs));
                     sendargs.emplace_back(std::move(args));
                     TreePtr res;
                     if (block == nullptr) {
                         res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(),
-                                       std::move(sendargs), {});
+                                       numPosArgs, std::move(sendargs), {});
                     } else {
                         auto convertedBlock = node2TreeImpl(dctx, std::move(block));
                         Literal *lit;
                         if ((lit = cast_tree<Literal>(convertedBlock)) && lit->isSymbol(dctx.ctx)) {
                             res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(),
-                                           std::move(sendargs), {}, symbol2Proc(dctx, std::move(convertedBlock)));
+                                           4, std::move(sendargs), {}, symbol2Proc(dctx, std::move(convertedBlock)));
                         } else {
                             sendargs.emplace_back(std::move(convertedBlock));
                             res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()),
-                                           core::Names::callWithSplatAndBlock(), std::move(sendargs), {});
+                                           core::Names::callWithSplatAndBlock(), 5, std::move(sendargs), {});
                         }
                     }
                     result = std::move(res);
@@ -566,26 +593,29 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
 
                     TreePtr res;
                     if (block == nullptr) {
-                        res = MK::Send(loc, std::move(rec), send->method, std::move(args), flags);
+                        res = MK::Send(loc, std::move(rec), send->method, numPosArgs, std::move(args), flags);
                     } else {
                         auto method =
                             MK::Literal(loc, core::make_type<core::LiteralType>(core::Symbols::Symbol(), send->method));
                         auto convertedBlock = node2TreeImpl(dctx, std::move(block));
                         Literal *lit;
                         if ((lit = cast_tree<Literal>(convertedBlock)) && lit->isSymbol(dctx.ctx)) {
-                            res = MK::Send(loc, std::move(rec), send->method, std::move(args), flags,
+                            res = MK::Send(loc, std::move(rec), send->method, numPosArgs, std::move(args), flags,
                                            symbol2Proc(dctx, std::move(convertedBlock)));
                         } else {
                             Send::ARGS_store sendargs;
                             sendargs.emplace_back(std::move(rec));
                             sendargs.emplace_back(std::move(method));
                             sendargs.emplace_back(std::move(convertedBlock));
+
+                            numPosArgs += 3;
+
                             for (auto &arg : args) {
                                 sendargs.emplace_back(std::move(arg));
                             }
 
                             res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithBlock(),
-                                           std::move(sendargs), {});
+                                           numPosArgs, std::move(sendargs), {});
                         }
                     }
 
@@ -675,15 +705,16 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 auto arg = node2TreeImpl(dctx, std::move(andAsgn->right));
                 if (auto s = cast_tree<Send>(recv)) {
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
 
                     assgnArgs.emplace_back(std::move(arg));
-                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs, std::move(readArgs),
+                                         s->flags);
                     core::NameRef tempResult =
                         dctx.ctx.state.freshNameUnique(core::UniqueNameKind::Desugar, s->fun, ++dctx.uniqueCounter);
                     stats.emplace_back(MK::Assign(sendLoc, tempResult, std::move(cond)));
 
-                    auto body = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto body = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                          std::move(assgnArgs), s->flags);
                     auto elsep = MK::Local(sendLoc, tempResult);
                     auto iff = MK::If(sendLoc, MK::Local(sendLoc, tempResult), std::move(body), std::move(elsep));
@@ -713,14 +744,15 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     }
 
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
                     assgnArgs.emplace_back(std::move(arg));
-                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs, std::move(readArgs),
+                                         s->flags);
                     core::NameRef tempResult =
                         dctx.ctx.state.freshNameUnique(core::UniqueNameKind::Desugar, s->fun, ++dctx.uniqueCounter);
                     stats.emplace_back(MK::Assign(sendLoc, tempResult, std::move(cond)));
 
-                    auto body = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto body = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                          std::move(assgnArgs), s->flags);
                     auto elsep = MK::Local(sendLoc, tempResult);
                     auto iff = MK::If(sendLoc, MK::Local(sendLoc, tempResult), std::move(body), std::move(elsep));
@@ -738,14 +770,15 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 auto arg = node2TreeImpl(dctx, std::move(orAsgn->right));
                 if (auto s = cast_tree<Send>(recv)) {
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
                     assgnArgs.emplace_back(std::move(arg));
-                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs, std::move(readArgs),
+                                         s->flags);
                     core::NameRef tempResult =
                         dctx.ctx.state.freshNameUnique(core::UniqueNameKind::Desugar, s->fun, ++dctx.uniqueCounter);
                     stats.emplace_back(MK::Assign(sendLoc, tempResult, std::move(cond)));
 
-                    auto elsep = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto elsep = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                           std::move(assgnArgs), s->flags);
                     auto body = MK::Local(sendLoc, tempResult);
                     auto iff = MK::If(sendLoc, MK::Local(sendLoc, tempResult), std::move(body), std::move(elsep));
@@ -775,14 +808,15 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     }
 
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
                     assgnArgs.emplace_back(std::move(arg));
-                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto cond = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs, std::move(readArgs),
+                                         s->flags);
                     core::NameRef tempResult =
                         dctx.ctx.state.freshNameUnique(core::UniqueNameKind::Desugar, s->fun, ++dctx.uniqueCounter);
                     stats.emplace_back(MK::Assign(sendLoc, tempResult, std::move(cond)));
 
-                    auto elsep = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto elsep = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                           std::move(assgnArgs), s->flags);
                     auto body = MK::Local(sendLoc, tempResult);
                     auto iff = MK::If(sendLoc, MK::Local(sendLoc, tempResult), std::move(body), std::move(elsep));
@@ -800,14 +834,14 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 auto rhs = node2TreeImpl(dctx, std::move(opAsgn->right));
                 if (auto s = cast_tree<Send>(recv)) {
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
 
-                    auto prevValue =
-                        MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto prevValue = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs,
+                                              std::move(readArgs), s->flags);
                     auto newValue = MK::Send1(sendLoc, std::move(prevValue), opAsgn->op, std::move(rhs));
                     assgnArgs.emplace_back(std::move(newValue));
 
-                    auto res = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto res = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                         std::move(assgnArgs), s->flags);
                     auto wrapped = MK::InsSeq(loc, std::move(stats), std::move(res));
                     result = std::move(wrapped);
@@ -841,13 +875,13 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     // and then perform basically the same logic as above for a send, but replacing it within
                     // the else-case of the if at the end instead
                     auto sendLoc = s->loc;
-                    auto [tempRecv, stats, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
-                    auto prevValue =
-                        MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, std::move(readArgs), s->flags);
+                    auto [tempRecv, stats, numPosArgs, readArgs, assgnArgs] = copyArgsForOpAsgn(dctx, s);
+                    auto prevValue = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun, numPosArgs,
+                                              std::move(readArgs), s->flags);
                     auto newValue = MK::Send1(sendLoc, std::move(prevValue), opAsgn->op, std::move(rhs));
                     assgnArgs.emplace_back(std::move(newValue));
 
-                    auto res = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx),
+                    auto res = MK::Send(sendLoc, MK::Local(sendLoc, tempRecv), s->fun.addEq(dctx.ctx), numPosArgs,
                                         std::move(assgnArgs), s->flags);
                     auto wrapped = MK::InsSeq(loc, std::move(stats), std::move(res));
                     ifExpr->elsep = std::move(wrapped);
@@ -1164,8 +1198,8 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 }
 
                 Send::ARGS_store noargs;
-                auto res = MK::Send(loc, node2TreeImpl(dctx, std::move(for_->expr)), core::Names::each(),
-                                    std::move(noargs), {}, std::move(block));
+                auto res = MK::Send0Block(loc, node2TreeImpl(dctx, std::move(for_->expr)), core::Names::each(),
+                                          std::move(block));
                 result = std::move(res);
             },
             [&](parser::Integer *integer) {
@@ -1514,7 +1548,7 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     // No enclosing block arg can happen when e.g. yield is called in a class / at the top-level.
                     recv = MK::RaiseUnimplemented(loc);
                 }
-                TreePtr res = MK::Send(loc, std::move(recv), core::Names::call(), std::move(args));
+                TreePtr res = MK::Send(loc, std::move(recv), core::Names::call(), args.size(), std::move(args));
                 result = std::move(res);
             },
             [&](parser::Rescue *rescue) {
@@ -1679,8 +1713,11 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     value = std::move(lit->scope);
                 }
                 absl::c_reverse(args);
-                auto res =
-                    MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::defined_p(), std::move(args));
+
+                // TODO(trevor) will these always be positional?
+                auto numPosArgs = args.size();
+                auto res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::defined_p(),
+                                    numPosArgs, std::move(args));
                 result = std::move(res);
             },
             [&](parser::LineLiteral *line) {
@@ -1710,8 +1747,9 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 for (auto &expr : undef->exprs) {
                     args.emplace_back(node2TreeImpl(dctx, move(expr)));
                 }
-                auto res =
-                    MK::Send(loc, MK::Constant(loc, core::Symbols::Kernel()), core::Names::undef(), std::move(args));
+                auto numPosArgs = args.size();
+                auto res = MK::Send(loc, MK::Constant(loc, core::Symbols::Kernel()), core::Names::undef(), numPosArgs,
+                                    std::move(args));
                 result = std::move(res);
             },
             [&](parser::Backref *backref) {
