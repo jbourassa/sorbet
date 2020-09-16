@@ -904,6 +904,7 @@ void SerializerImpl::pickle(Pickler &p, const ast::TreePtr &what) {
             // Can replace this with std::bit_cast in C++20
             memcpy(&flags, &s->flags, sizeof(flags));
             p.putU1(flags);
+            p.putU1(s->numPosArgs);
             p.putU4(s->args.size());
             pickle(p, s->recv);
             pickleTree(p, s->block);
