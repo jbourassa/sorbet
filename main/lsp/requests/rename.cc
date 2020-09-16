@@ -54,6 +54,9 @@ unique_ptr<WorkspaceEdit> RenameTask::getRenameEdits(const core::GlobalState &gs
     return we;
 }
 
+RenameTask::RenameTask(const LSPConfiguration &config, MessageId id, unique_ptr<RenameParams> params)
+    : LSPRequestTask(config, move(id), LSPMethod::TextDocumentRename), params(move(params)) {}
+
 unique_ptr<ResponseMessage> RenameTask::runRequest(LSPTypecheckerDelegate &typechecker) {
     const core::GlobalState &gs = typechecker.state();
 
