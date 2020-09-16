@@ -548,7 +548,7 @@ public:
         found.varianceName = core::NameRef();
         found.isTypeTemplete = send->fun == core::Names::typeTemplate();
 
-        if (send->args.size() > 2) {
+        if (send->numPosArgs > 1) {
             // Too many arguments. Define a static field that we'll use for this type åmember later.
             FoundStaticField staticField;
             staticField.owner = found.owner;
@@ -560,22 +560,30 @@ public:
         }
 
         if (!send->args.empty()) {
-            auto *lit = ast::cast_tree_const<ast::Literal>(send->args[0]);
-            if (lit != nullptr && lit->isSymbol(ctx)) {
-                found.varianceName = lit->asSymbol(ctx);
-                found.litLoc = lit->loc;
+
+            // If there are positional arguments, there might be a variance annotation
+            if (send->numPosArgs > 0) {
+                auto *lit = ast::cast_tree_const<ast::Literal>(send->args[0]);
+                if (lit != nullptr && lit->isSymbol(ctx)) {
+                    found.varianceName = lit->asSymbol(ctx);
+                    found.litLoc = lit->loc;
+                }
             }
 
-            if (auto *hash = ast::cast_tree_const<ast::Hash>(send->args.back())) {
-                for (auto &keyExpr : hash->keys) {
-                    auto key = ast::cast_tree_const<ast::Literal>(keyExpr);
-                    core::NameRef name;
-                    if (key != nullptr && key->isSymbol(ctx)) {
-                        switch (key->asSymbol(ctx)._id) {
-                            case core::Names::fixed()._id:
-                                found.isFixed = true;
-                                break;
-                        }
+            auto end = send->args.size();
+            if (send->hasKwSplat()) {
+                end -= 1;
+            }
+
+            // Walk over the 
+            for (auto i = send->numPosArgs; i < end; i += 2) {
+                auto *key = ast::cast_tree_const<ast::Literal>(send->args[i]);
+                core::NameRef name;
+                if (key != nullptr && key->isSymbol(ctx)) {
+                    switch (key->asSymbol(ctx)._id) {
+                        case core::Names::fixed()._id:
+                            found.isFixed = true;
+                            break;
                     }
                 }
             }
@@ -1598,7 +1606,7 @@ public:
         }
 
         if (!send->args.empty()) {
-            if (send->args.size() > 2) {
+            if (send->numPosArgs > 1) {
                 if (auto e = ctx.state.beginError(core::Loc(ctx.file, send->loc),
                                                   core::errors::Namer::InvalidTypeDefinition)) {
                     e.setHeader("Too many args in type definition");
@@ -1614,13 +1622,14 @@ public:
             ENFORCE(onSymbol.exists());
             core::SymbolRef sym = ctx.state.lookupTypeMemberSymbol(onSymbol, typeName->cnst);
             ENFORCE(sym.exists());
-            auto lit = ast::cast_tree<ast::Literal>(send->args.front());
-            if (auto *hash = ast::cast_tree<ast::Hash>(send->args.back())) {
+
+            if (send->hasKwArgs()) {
                 bool fixed = false;
                 bool bounded = false;
 
-                for (auto &keyExpr : hash->keys) {
-                    auto key = ast::cast_tree<ast::Literal>(keyExpr);
+                auto [start, end] = send->kwArgsRange();
+                for (auto i = start; i < end; i += 2) {
+                    auto key = ast::cast_tree<ast::Literal>(send->args[i]);
                     if (key != nullptr && key->isSymbol(ctx)) {
                         switch (key->asSymbol(ctx)._id) {
                             case core::Names::fixed()._id:
@@ -1651,11 +1660,17 @@ public:
                         e.setHeader("Missing required param `{}`", "fixed");
                     }
                 }
-            } else if (send->args.size() != 1 || !lit || !lit->isSymbol(ctx)) {
-                if (auto e = ctx.beginError(send->loc, core::errors::Namer::InvalidTypeDefinition)) {
-                    e.setHeader("Invalid param, must be a :symbol");
+            }
+
+            if (send->numPosArgs > 0) {
+                auto *lit = ast::cast_tree<ast::Literal>(send->args.front());
+                if (!lit || !lit->isSymbol(ctx)) {
+                    if (auto e = ctx.beginError(send->loc, core::errors::Namer::InvalidTypeDefinition)) {
+                        e.setHeader("Invalid param, must be a :symbol");
+                    }
                 }
             }
+
         }
 
         return tree;

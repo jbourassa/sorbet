@@ -719,21 +719,21 @@ public:
     virtual std::string showRaw(const core::GlobalState &gs, int tabs = 0);
     virtual std::string nodeName();
 
+    std::pair<int, int> kwArgsRange() const {
+        auto res = std::make_pair<int, int>(numPosArgs, args.size());
+        if (hasKwSplat()) {
+            res.second = res.second - 1;
+        }
+        return res;
+    }
+
+    // True when there are keyword args, but false when there is just a keyword splat.
     bool hasKwArgs() const {
-      return numPosArgs < args.size();
+        return ((args.size() - numPosArgs) & ~0x1);
     }
 
-    // The last argument is a keyword splat if the keyword arguments portion of the send args are of odd length.
     bool hasKwSplat() const {
-      return (args.size() - numPosArgs) & 0x1;
-    }
-
-    std::optional<int> kwArgsOffset() const {
-      if (hasKwArgs()) {
-        return std::make_optional(numPosArgs);
-      } else {
-        return std::nullopt;
-      }
+        return (args.size() - numPosArgs) & 0x1;
     }
 
 private:

@@ -515,21 +515,23 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 if (numPosArgs > 0) {
                     // Deconstruct the kwargs hash in the last argument if it's present.
                     if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
-                        numPosArgs -= 1;
+                        if (hash->kwargs) {
+                            numPosArgs -= 1;
 
-                        auto node = std::move(send->args.back());
-                        send->args.pop_back();
+                            auto node = std::move(send->args.back());
+                            send->args.pop_back();
 
-                        // inline the hash into the
-                        for (auto &entry : hash->pairs) {
-                            typecase(
-                                entry.get(),
-                                [&](parser::Pair *pair) {
-                                    send->args.emplace_back(std::move(pair->key));
-                                    send->args.emplace_back(std::move(pair->value));
-                                },
-                                [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
-                                [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                            // inline the hash into the
+                            for (auto &entry : hash->pairs) {
+                                typecase(
+                                    entry.get(),
+                                    [&](parser::Pair *pair) {
+                                        send->args.emplace_back(std::move(pair->key));
+                                        send->args.emplace_back(std::move(pair->value));
+                                    },
+                                    [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
+                                    [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                            }
                         }
                     }
                 }
