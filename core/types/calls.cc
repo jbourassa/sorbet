@@ -659,7 +659,10 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
     auto ait = args.args.begin();
     auto aend = args.args.end();
 
-    while (pit != pend && ait != aend) {
+    // The last positional argument is used later to determine if all required positional arguments have been provided.
+    auto posEnd = ait + args.numPosArgs;
+
+    while (pit != pend && ait != posEnd) {
         const ArgInfo &spec = *pit;
         auto &arg = *ait;
         if (spec.flags.isKeyword) {
@@ -718,10 +721,13 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
         // TODO(trevor) is the default underlying type ok here?
         ShapeType hashArgType;
 
-        auto kwargsEnd = ait + numKwArgs;
-        while (ait != kwargsEnd) {
-            auto &key = *ait++;
-            auto &val = *ait++;
+        ENFORCE(numKwArgs % 2 == 0, "Keyword arguments aren't a list of pairs");
+
+        auto argit = args.args.begin() + args.numPosArgs;
+        auto kwargsEnd = argit + numKwArgs;
+        while (argit != kwargsEnd) {
+            auto &key = *argit++;
+            auto &val = *argit++;
             hashArgType.keys.emplace_back(key->type);
             hashArgType.values.emplace_back(val->type);
         }
@@ -730,12 +736,7 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
             auto &splatArg = *(aend - 1);
             auto splatArgType = Types::approximate(gs, splatArg->type, *constr);
 
-            if (splatArgType->isUntyped()) {
-                // Allow an untyped arg to satisfy all remaining kwargs
-                --aend;
-            } else if (auto *hash = cast_type<ShapeType>(splatArgType.get())) {
-                --aend;
-
+            if (auto *hash = cast_type<ShapeType>(splatArgType.get())) {
                 // merge this hash into the existing one
                 for (auto i = 0; i < hash->keys.size(); ++i) {
                     hashArgType.keys.emplace_back(hash->keys[i]);
@@ -743,7 +744,8 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
                 }
             } else if (splatArgType->derivesFrom(gs, Symbols::Hash())) {
                 if (auto e = gs.beginError(core::Loc(args.locs.file, args.locs.call), errors::Infer::UntypedSplat)) {
-                    e.setHeader("Passing a hash where the specific keys are unknown to a method taking keyword arguments");
+                    e.setHeader(
+                        "Passing a hash where the specific keys are unknown to a method taking keyword arguments");
                     e.addErrorSection(ErrorSection("Got " + splatArgType->show(gs) + " originating from:",
                                                    splatArg->origins2Explanations(gs)));
                     result.main.errors.emplace_back(e.build());
@@ -781,8 +783,8 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
                     auto offset = it - hashArgType.keys.begin();
                     tpe.type = hashArgType.values[offset];
                     if (auto e = matchArgType(gs, *constr, core::Loc(args.locs.file, args.locs.call),
-                                              core::Loc(args.locs.file, args.locs.receiver), symbol, method, tpe,
-                                              spec, args.selfType, targs, Loc::none())) {
+                                              core::Loc(args.locs.file, args.locs.receiver), symbol, method, tpe, spec,
+                                              args.selfType, targs, Loc::none())) {
                         result.main.errors.emplace_back(std::move(e));
                     }
                 }
@@ -825,19 +827,23 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
 
             if (auto e = gs.beginError(core::Loc(args.locs.file, args.locs.call),
                                        errors::Infer::MethodArgumentCountMismatch)) {
-                e.setHeader("Unrecognized keyword argument `{}` passed for method `{}`", arg.show(gs),
-                            data->show(gs));
+                e.setHeader("Unrecognized keyword argument `{}` passed for method `{}`", arg.show(gs), data->show(gs));
                 result.main.errors.emplace_back(e.build());
             }
         }
     }
-    if (hasKwargs && aend == args.args.end()) {
-        // We have keyword arguments, but we didn't consume a hash at the
-        // end. Report an error for each missing required keyword arugment.
+
+    if (hasKwargs) {
+        // Check for keyword arguments with no default value, that didn't show up in the consumed set.
         for (auto &spec : data->arguments()) {
             if (!spec.flags.isKeyword || spec.flags.isDefault || spec.flags.isRepeated) {
                 continue;
             }
+
+            if (consumed.find(spec.name) != consumed.end()) {
+                continue;
+            }
+
             if (auto e = missingArg(gs, core::Loc(args.locs.file, args.locs.call),
                                     core::Loc(args.locs.file, args.locs.receiver), method, spec)) {
                 result.main.errors.emplace_back(std::move(e));
@@ -845,7 +851,7 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
         }
     }
 
-    if (ait != aend) {
+    if (ait != posEnd) {
         if (auto e =
                 gs.beginError(core::Loc(args.locs.file, args.locs.call), errors::Infer::MethodArgumentCountMismatch)) {
             if (!hasKwargs) {

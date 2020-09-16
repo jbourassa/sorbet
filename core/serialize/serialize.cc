@@ -1108,6 +1108,7 @@ ast::TreePtr SerializerImpl::unpickleExpr(serialize::UnPickler &p, const GlobalS
             static_assert(sizeof(flags) == sizeof(flagsU1));
             // Can replace this with std::bit_cast in C++20
             memcpy(&flags, &flagsU1, sizeof(flags));
+            auto numPosArgs = p.getU1();
             auto argsSize = p.getU4();
             auto recv = unpickleExpr(p, gs, file);
             auto blkt = unpickleExpr(p, gs, file);
@@ -1115,7 +1116,6 @@ ast::TreePtr SerializerImpl::unpickleExpr(serialize::UnPickler &p, const GlobalS
             if (blkt) {
                 blk.reset(static_cast<ast::Block *>(blkt.release()));
             }
-            auto numPosArgs = p.getU1();
             ast::Send::ARGS_store store(argsSize);
             for (auto &expr : store) {
                 expr = unpickleExpr(p, gs, file);
