@@ -110,7 +110,7 @@ public:
 };
 
 ast::TreePtr addSigVoid(ast::TreePtr expr) {
-    return ast::MK::InsSeq1(expr->loc, ast::MK::SigVoid(expr->loc, ast::MK::Hash0(expr->loc)), std::move(expr));
+    return ast::MK::InsSeq1(expr->loc, ast::MK::SigVoid(expr->loc, {}), std::move(expr));
 }
 } // namespace
 

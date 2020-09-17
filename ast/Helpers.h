@@ -287,8 +287,10 @@ public:
         return Hash(loc, std::move(keys), std::move(values));
     }
 
-    static TreePtr Sig(core::LocOffsets loc, TreePtr hash, TreePtr ret) {
-        auto params = Send1(loc, Self(loc), core::Names::params(), std::move(hash));
+    static TreePtr Sig(core::LocOffsets loc, Send::ARGS_store args, TreePtr ret) {
+        ENFORCE(args.size() % 2 == 0, "Sig params must be arg name/type pairs");
+
+        auto params = Send(loc, Self(loc), core::Names::params(), 0, std::move(args));
         auto returns = Send1(loc, std::move(params), core::Names::returns(), std::move(ret));
         auto sig = Send1(loc, Constant(loc, core::Symbols::Sorbet_Private_Static()), core::Names::sig(),
                          Constant(loc, core::Symbols::T_Sig_WithoutRuntime()));
@@ -298,8 +300,10 @@ public:
         return sig;
     }
 
-    static TreePtr SigVoid(core::LocOffsets loc, TreePtr hash) {
-        auto params = Send1(loc, Self(loc), core::Names::params(), std::move(hash));
+    static TreePtr SigVoid(core::LocOffsets loc, Send::ARGS_store args) {
+        ENFORCE(args.size() % 2 == 0, "Sig params must be arg name/type pairs");
+
+        auto params = Send(loc, Self(loc), core::Names::params(), 0, std::move(args));
         auto void_ = Send0(loc, std::move(params), core::Names::void_());
         auto sig = Send1(loc, Constant(loc, core::Symbols::Sorbet_Private_Static()), core::Names::sig(),
                          Constant(loc, core::Symbols::T_Sig_WithoutRuntime()));
@@ -320,7 +324,10 @@ public:
     }
 
     static TreePtr Sig1(core::LocOffsets loc, TreePtr key, TreePtr value, TreePtr ret) {
-        return Sig(loc, Hash1(loc, std::move(key), std::move(value)), std::move(ret));
+        Send::ARGS_store args;
+        args.emplace_back(std::move(key));
+        args.emplace_back(std::move(value));
+        return Sig(loc, std::move(args), std::move(ret));
     }
 
     static TreePtr T(core::LocOffsets loc) {

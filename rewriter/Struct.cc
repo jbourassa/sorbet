@@ -59,8 +59,7 @@ vector<ast::TreePtr> Struct::run(core::MutableContext ctx, ast::Assign *asgn) {
     auto loc = asgn->loc;
 
     ast::MethodDef::ARGS_store newArgs;
-    ast::Hash::ENTRY_store sigKeys;
-    ast::Hash::ENTRY_store sigValues;
+    ast::Send::ARGS_store sigArgs;
     ast::ClassDef::RHS_store body;
 
     bool keywordInit = false;
@@ -91,8 +90,8 @@ vector<ast::TreePtr> Struct::run(core::MutableContext ctx, ast::Assign *asgn) {
             symLoc = core::LocOffsets{symLoc.beginPos() + 1, symLoc.endPos()};
         }
 
-        sigKeys.emplace_back(ast::MK::Symbol(symLoc, name));
-        sigValues.emplace_back(ast::MK::Constant(symLoc, core::Symbols::BasicObject()));
+        sigArgs.emplace_back(ast::MK::Symbol(symLoc, name));
+        sigArgs.emplace_back(ast::MK::Constant(symLoc, core::Symbols::BasicObject()));
         auto argName = ast::MK::Local(symLoc, name);
         if (keywordInit) {
             argName = ast::MK::KeywordArg(symLoc, move(argName));
@@ -127,7 +126,7 @@ vector<ast::TreePtr> Struct::run(core::MutableContext ctx, ast::Assign *asgn) {
         // NOTE: the code in this block _STEALS_ trees. No _return empty_'s should go after it
     }
 
-    body.emplace_back(ast::MK::SigVoid(loc, ast::MK::Hash(loc, std::move(sigKeys), std::move(sigValues))));
+    body.emplace_back(ast::MK::SigVoid(loc, std::move(sigArgs)));
     body.emplace_back(ast::MK::SyntheticMethod(loc, core::Loc(ctx.file, loc), core::Names::initialize(),
                                                std::move(newArgs), ast::MK::RaiseUnimplemented(loc)));
 

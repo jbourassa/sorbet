@@ -281,7 +281,7 @@ vector<ast::TreePtr> processProp(core::MutableContext ctx, PropInfo &ret, PropCo
 
     auto ivarName = name.addAt(ctx);
 
-    nodes.emplace_back(ast::MK::Sig(loc, ast::MK::Hash0(loc), ASTUtil::dupType(getType)));
+    nodes.emplace_back(ast::MK::Sig(loc, {}, ASTUtil::dupType(getType)));
 
     if (computedByMethodName.exists()) {
         // Given `const :foo, type, computed_by: <name>`, where <name> is a Symbol pointing to a class method,
@@ -336,9 +336,10 @@ vector<ast::TreePtr> processProp(core::MutableContext ctx, PropInfo &ret, PropCo
     // Compute the setter
     if (!ret.isImmutable) {
         auto setType = ASTUtil::dupType(ret.type);
-        nodes.emplace_back(ast::MK::Sig(
-            loc, ast::MK::Hash1(loc, ast::MK::Symbol(nameLoc, core::Names::arg0()), ASTUtil::dupType(setType)),
-            ASTUtil::dupType(setType)));
+        ast::Send::ARGS_store sigArgs;
+        sigArgs.emplace_back(ast::MK::Symbol(nameLoc, core::Names::arg0()));
+        sigArgs.emplace_back(ASTUtil::dupType(setType));
+        nodes.emplace_back(ast::MK::Sig(loc, std::move(sigArgs), ASTUtil::dupType(setType)));
 
         if (propContext.classDefKind == ast::ClassDef::Kind::Module) {
             // Not all modules include Kernel, can't make an initialize, etc. so we're punting on props in modules rn.
@@ -452,11 +453,9 @@ ast::TreePtr ensureWithoutAccessors(const PropInfo &prop, const ast::Send *send)
 vector<ast::TreePtr> mkTypedInitialize(core::MutableContext ctx, core::LocOffsets klassLoc,
                                        const vector<PropInfo> &props) {
     ast::MethodDef::ARGS_store args;
-    ast::Hash::ENTRY_store sigKeys;
-    ast::Hash::ENTRY_store sigVals;
+    ast::Send::ARGS_store sigArgs;
     args.reserve(props.size());
-    sigKeys.reserve(props.size());
-    sigVals.reserve(props.size());
+    sigArgs.reserve(props.size() * 2);
 
     // add all the required props first.
     for (const auto &prop : props) {
@@ -465,8 +464,8 @@ vector<ast::TreePtr> mkTypedInitialize(core::MutableContext ctx, core::LocOffset
         }
         auto loc = prop.loc;
         args.emplace_back(ast::MK::KeywordArg(loc, ast::MK::Local(loc, prop.name)));
-        sigKeys.emplace_back(ast::MK::Symbol(loc, prop.name));
-        sigVals.emplace_back(prop.type.deepCopy());
+        sigArgs.emplace_back(ast::MK::Symbol(loc, prop.name));
+        sigArgs.emplace_back(prop.type.deepCopy());
     }
 
     // then, add all the optional props.
@@ -477,8 +476,8 @@ vector<ast::TreePtr> mkTypedInitialize(core::MutableContext ctx, core::LocOffset
         auto loc = prop.loc;
         args.emplace_back(ast::MK::OptionalArg(loc, ast::MK::KeywordArg(loc, ast::MK::Local(loc, prop.name)),
                                                prop.default_.deepCopy()));
-        sigKeys.emplace_back(ast::MK::Symbol(loc, prop.name));
-        sigVals.emplace_back(prop.type.deepCopy());
+        sigArgs.emplace_back(ast::MK::Symbol(loc, prop.name));
+        sigArgs.emplace_back(prop.type.deepCopy());
     }
 
     // then initialize all the instance variables in the body
@@ -491,7 +490,7 @@ vector<ast::TreePtr> mkTypedInitialize(core::MutableContext ctx, core::LocOffset
     auto body = ast::MK::InsSeq(klassLoc, std::move(stats), ast::MK::ZSuper(klassLoc));
 
     vector<ast::TreePtr> result;
-    result.emplace_back(ast::MK::SigVoid(klassLoc, ast::MK::Hash(klassLoc, std::move(sigKeys), std::move(sigVals))));
+    result.emplace_back(ast::MK::SigVoid(klassLoc, std::move(sigArgs)));
     result.emplace_back(ast::MK::SyntheticMethod(klassLoc, core::Loc(ctx.file, klassLoc), core::Names::initialize(),
                                                  std::move(args), std::move(body)));
     return result;
