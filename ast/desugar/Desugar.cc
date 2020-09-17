@@ -511,36 +511,11 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     flags.isPrivateOk = true;
                 }
 
-                int numPosArgs = send->args.size();
-                if (numPosArgs > 0) {
-                    // Deconstruct the kwargs hash in the last argument if it's present.
-                    if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
-                        if (hash->kwargs) {
-                            numPosArgs -= 1;
-
-                            auto node = std::move(send->args.back());
-                            send->args.pop_back();
-
-                            // inline the hash into the
-                            for (auto &entry : hash->pairs) {
-                                typecase(
-                                    entry.get(),
-                                    [&](parser::Pair *pair) {
-                                        send->args.emplace_back(std::move(pair->key));
-                                        send->args.emplace_back(std::move(pair->value));
-                                    },
-                                    [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
-                                    [&](parser::Node *node) { Exception::raise("Unhandled case"); });
-                            }
-                        }
-                    }
-                }
-
                 if (absl::c_any_of(send->args, [](auto &arg) { return parser::isa_node<parser::Splat>(arg.get()); })) {
                     // If we have a splat anywhere in the argument list, desugar
                     // the argument list as a single Array node, and then
                     // synthesize a call to
-                    //   Magic.callWithSplat(receiver, method, argArray, [&blk])
+                    //   Magic.callWithSplat(receiver, method, argArray, kwargsArray, [&blk])
                     // The callWithSplat implementation (in C++) will unpack a
                     // tuple type and call into the normal call merchanism.
                     unique_ptr<parser::Node> block;
@@ -551,9 +526,32 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                         auto *bp = parser::cast_node<parser::BlockPass>(it->get());
                         block = std::move(bp->block);
                         argnodes.erase(it);
+                    }
 
-                        // decrement the number of positional args, as we don't count the block
-                        numPosArgs--;
+                    int numPosArgs = send->args.size();
+                    Array::ENTRY_store kwArgs;
+                    if (!send->args.empty()) {
+                        // Deconstruct the kwargs hash in the last argument if it's present.
+                        if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
+                            if (hash->kwargs) {
+
+                                numPosArgs--;
+                                auto node = std::move(send->args.back());
+                                send->args.pop_back();
+
+                                // inline the hash into the
+                                for (auto &entry : hash->pairs) {
+                                    typecase(
+                                        entry.get(),
+                                        [&](parser::Pair *pair) {
+                                            kwArgs.emplace_back(std::move(pair->key));
+                                            kwArgs.emplace_back(std::move(pair->value));
+                                        },
+                                        [&](parser::Kwsplat *kwsplat) { kwArgs.emplace_back(std::move(kwsplat->expr)); },
+                                        [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                                }
+                            }
+                        }
                     }
 
                     auto array = make_unique<parser::Array>(loc, std::move(argnodes));
@@ -564,8 +562,8 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     Send::ARGS_store sendargs;
                     sendargs.emplace_back(std::move(rec));
                     sendargs.emplace_back(std::move(method));
-                    sendargs.emplace_back(MK::Int(loc, numPosArgs));
                     sendargs.emplace_back(std::move(args));
+                    sendargs.emplace_back(make_tree<Array>(loc, std::move(kwArgs)));
                     TreePtr res;
                     if (block == nullptr) {
                         res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(),
@@ -584,6 +582,31 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     }
                     result = std::move(res);
                 } else {
+                    auto numPosArgs = send->args.size();
+                    if (numPosArgs > 0) {
+                        // Deconstruct the kwargs hash in the last argument if it's present.
+                        if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
+                            if (hash->kwargs) {
+                                numPosArgs -= 1;
+
+                                auto node = std::move(send->args.back());
+                                send->args.pop_back();
+
+                                // inline the hash into the
+                                for (auto &entry : hash->pairs) {
+                                    typecase(
+                                        entry.get(),
+                                        [&](parser::Pair *pair) {
+                                            send->args.emplace_back(std::move(pair->key));
+                                            send->args.emplace_back(std::move(pair->value));
+                                        },
+                                        [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
+                                        [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                                }
+                            }
+                        }
+                    }
+
                     Send::ARGS_store args;
                     unique_ptr<parser::Node> block;
                     args.reserve(send->args.size());
