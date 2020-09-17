@@ -551,6 +551,9 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                         auto *bp = parser::cast_node<parser::BlockPass>(it->get());
                         block = std::move(bp->block);
                         argnodes.erase(it);
+
+                        // decrement the number of positional args, as we don't count the block
+                        numPosArgs--;
                     }
 
                     auto array = make_unique<parser::Array>(loc, std::move(argnodes));
