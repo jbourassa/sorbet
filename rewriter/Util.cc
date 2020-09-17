@@ -176,6 +176,23 @@ ast::Send *ASTUtil::castSig(ast::Send *send, core::NameRef returns) {
     return send;
 }
 
+ast::TreePtr ASTUtil::mkKwArgsHash(const ast::Send *send) {
+    if (!send->hasKwArgs()) {
+        return nullptr;
+    }
+
+    ast::Hash::ENTRY_store keys;
+    ast::Hash::ENTRY_store values;
+
+    auto [kwStart,kwEnd] = send->kwArgsRange();
+    for (auto i = kwStart; i < kwEnd; i += 2) {
+        keys.emplace_back(send->args[i].deepCopy());
+        values.emplace_back(send->args[i+1].deepCopy());
+    }
+
+    return ast::MK::Hash(send->loc, std::move(keys), std::move(values));
+}
+
 ast::TreePtr ASTUtil::mkGet(core::Context ctx, core::LocOffsets loc, core::NameRef name, ast::TreePtr rhs) {
     return ast::MK::SyntheticMethod0(loc, core::Loc(ctx.file, loc), name, move(rhs));
 }

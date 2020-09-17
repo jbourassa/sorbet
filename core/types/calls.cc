@@ -863,12 +863,8 @@ DispatchResult dispatchCallSymbol(const GlobalState &gs, DispatchArgs args,
                 // people some slightly confusing error messages.
 
                 // count the number of arguments
-                int posArgs = args.args.size();
-                // and if we have keyword arguments (i.e. if the last argument is a hash) then subtract 1 to get the
-                // total number of positional arguments
-                if (posArgs > 0 && isa_type<ShapeType>(args.args.back()->type.get())) {
-                    posArgs--;
-                }
+                int posArgs = args.numPosArgs;
+
                 // print a helpful error message
                 e.setHeader("Too many positional arguments provided for method `{}`. Expected: `{}`, got: `{}`",
                             data->show(gs), prettyArity(gs, method), posArgs);

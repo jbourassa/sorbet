@@ -56,13 +56,13 @@ vector<ast::TreePtr> MixinEncryptedProp::run(core::MutableContext ctx, ast::Send
     auto nameLoc = core::LocOffsets{sym->loc.beginPos() + 1, sym->loc.endPos()};
     enc_name = name.prepend(ctx, "encrypted_");
 
-    ast::Hash *rules = nullptr;
+    ast::TreePtr rules;
     if (!send->args.empty()) {
-        rules = ast::cast_tree<ast::Hash>(send->args.back());
+        rules = ASTUtil::mkKwArgsHash(send);
     }
 
-    if (rules) {
-        if (ASTUtil::hasTruthyHashValue(ctx, *rules, core::Names::immutable())) {
+    if (auto *hash = ast::cast_tree<ast::Hash>(rules)) {
+        if (ASTUtil::hasTruthyHashValue(ctx, *hash, core::Names::immutable())) {
             isImmutable = true;
         }
     }

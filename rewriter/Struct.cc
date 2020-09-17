@@ -5,6 +5,7 @@
 #include "core/Context.h"
 #include "core/Names.h"
 #include "core/core.h"
+#include "rewriter/Util.h"
 #include "rewriter/rewriter.h"
 
 using namespace std;
@@ -63,7 +64,8 @@ vector<ast::TreePtr> Struct::run(core::MutableContext ctx, ast::Assign *asgn) {
     ast::ClassDef::RHS_store body;
 
     bool keywordInit = false;
-    if (auto *hash = ast::cast_tree<ast::Hash>(send->args.back())) {
+    auto kwArgsTree = ASTUtil::mkKwArgsHash(send);
+    if (auto *hash = ast::cast_tree<ast::Hash>(kwArgsTree)) {
         if (send->args.size() == 1) {
             // leave bad usages like `Struct.new(keyword_init: true)` untouched so we error later
             return empty;

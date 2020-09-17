@@ -1,4 +1,5 @@
 #include "rewriter/Delegate.h"
+#include "rewriter/Util.h"
 #include "ast/Helpers.h"
 #include "core/GlobalState.h"
 #include <optional>
@@ -47,7 +48,8 @@ vector<ast::TreePtr> Delegate::run(core::MutableContext ctx, const ast::Send *se
         return empty;
     }
 
-    auto options = ast::cast_tree_const<ast::Hash>(send->args.back());
+    auto optionsTree = ASTUtil::mkKwArgsHash(send);
+    auto options = ast::cast_tree_const<ast::Hash>(optionsTree);
     if (!options) {
         return empty;
     }

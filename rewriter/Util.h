@@ -19,6 +19,8 @@ public:
     static ast::Send *castSig(ast::TreePtr &expr, core::NameRef returns);
     static ast::Send *castSig(ast::Send *expr, core::NameRef returns);
 
+    static ast::TreePtr mkKwArgsHash(const ast::Send *send);
+
     static ast::TreePtr mkGet(core::Context ctx, core::LocOffsets loc, core::NameRef name, ast::TreePtr rhs);
 
     static ast::TreePtr mkSet(core::Context ctx, core::LocOffsets loc, core::NameRef name, core::LocOffsets argLoc,

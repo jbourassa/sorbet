@@ -153,7 +153,7 @@ optional<PropInfo> parseProp(core::MutableContext ctx, const ast::Send *send) {
             return std::nullopt;
     }
 
-    if (send->args.size() >= 4) {
+    if (send->numPosArgs >= 3) {
         // Too many args, even if all optional args were provided.
         return nullopt;
     }
@@ -190,14 +190,10 @@ optional<PropInfo> parseProp(core::MutableContext ctx, const ast::Send *send) {
     ENFORCE(ASTUtil::dupType(ret.type) != nullptr, "No obvious type AST for this prop");
 
     // ----- Does the prop have any extra options? -----
-    ast::TreePtr rulesTree;
-    if (!send->args.empty()) {
-        if (auto back = ast::cast_tree_const<ast::Hash>(send->args.back())) {
-            // Deep copy the rules hash so that we can destruct it at will to parse things,
-            // without having to worry about whether we stole things from the tree.
-            rulesTree = back->deepCopy();
-        }
-    }
+
+    // Deep copy the rules hash so that we can destruct it at will to parse things,
+    // without having to worry about whether we stole things from the tree.
+    ast::TreePtr rulesTree = ASTUtil::mkKwArgsHash(send);
     if (rulesTree == nullptr && send->args.size() >= 3) {
         // No rules, but 3 args including name and type. Also not a T::Props
         return std::nullopt;
@@ -439,11 +435,14 @@ ast::TreePtr ensureWithoutAccessors(const PropInfo &prop, const ast::Send *send)
         auto *copy = ast::cast_tree<ast::Send>(result);
         if (copy->args.empty()) {
             copy->args.emplace_back(ast::MK::Hash1(send->loc, std::move(withoutAccessors), std::move(true_)));
-        } else if (auto rules = ast::cast_tree<ast::Hash>(copy->args.back())) {
-            rules->keys.emplace_back(std::move(withoutAccessors));
-            rules->values.emplace_back(std::move(true_));
         } else {
-            copy->args.emplace_back(ast::MK::Hash1(send->loc, std::move(withoutAccessors), std::move(true_)));
+            auto rulesTree = ASTUtil::mkKwArgsHash(copy);
+            if (auto *rules = ast::cast_tree<ast::Hash>(rulesTree)) {
+                rules->keys.emplace_back(std::move(withoutAccessors));
+                rules->values.emplace_back(std::move(true_));
+            } else {
+                copy->args.emplace_back(ast::MK::Hash1(send->loc, std::move(withoutAccessors), std::move(true_)));
+            }
         }
 
         return result;
