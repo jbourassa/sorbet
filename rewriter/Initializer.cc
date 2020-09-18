@@ -88,7 +88,7 @@ void Initializer::run(core::MutableContext ctx, ast::MethodDef *methodDef, ast::
     UnorderedMap<core::NameRef, const ast::TreePtr *> argTypeMap;
     for (int i = kwStart; i < kwEnd; i += 2) {
         auto *argName = ast::cast_tree_const<ast::Literal>(params->args[i]);
-        auto *argVal = &params->args[i+1];
+        auto *argVal = &params->args[i + 1];
         if (argName->isSymbol(ctx)) {
             argTypeMap[argName->asSymbol(ctx)] = argVal;
         }

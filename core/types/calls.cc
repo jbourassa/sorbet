@@ -1538,7 +1538,8 @@ public:
         if (kwTuple == nullptr && !kwArgsType->isNilClass()) {
             if (auto e =
                     gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
-                e.setHeader("Keyword args with splats are only supported where the shape of the hash is known statically");
+                e.setHeader(
+                    "Keyword args with splats are only supported where the shape of the hash is known statically");
             }
             return;
         }
@@ -1832,7 +1833,8 @@ public:
         if (kwTuple == nullptr && !kwType->isNilClass()) {
             if (auto e =
                     gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
-                e.setHeader("Keyword args with splats are only supported where the shape of the hash is known statically");
+                e.setHeader(
+                    "Keyword args with splats are only supported where the shape of the hash is known statically");
             }
             return;
         }

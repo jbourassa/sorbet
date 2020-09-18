@@ -512,7 +512,6 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                 }
 
                 if (absl::c_any_of(send->args, [](auto &arg) { return parser::isa_node<parser::Splat>(arg.get()); })) {
-
                     // Build up an array that represents the keyword args for the send. When there is a Kwsplat, treat
                     // all keyword arguments as a single argument.
                     unique_ptr<parser::Node> kwArray;
@@ -527,11 +526,11 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                                 parser::NodeVec elts;
 
                                 // skip inlining the kwargs if there are any non-key/value pairs present
-                                if (absl::c_any_of(hash->pairs,
-                                                    [](auto &arg) { return !parser::isa_node<parser::Pair>(arg.get()); })) {
+                                if (absl::c_any_of(hash->pairs, [](auto &arg) {
+                                        return !parser::isa_node<parser::Pair>(arg.get());
+                                    })) {
                                     elts.emplace_back(std::move(node));
                                 } else {
-
                                     // inline the hash into the send args
                                     for (auto &entry : hash->pairs) {
                                         typecase(
@@ -585,8 +584,8 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     sendargs.emplace_back(std::move(kwargs));
                     TreePtr res;
                     if (block == nullptr) {
-                        res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(),
-                                       4, std::move(sendargs), {});
+                        res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(), 4,
+                                       std::move(sendargs), {});
                     } else {
                         auto convertedBlock = node2TreeImpl(dctx, std::move(block));
                         Literal *lit;
@@ -601,7 +600,6 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     }
                     result = std::move(res);
                 } else {
-
                     int numPosArgs = send->args.size();
                     if (numPosArgs > 0) {
                         // Deconstruct the kwargs hash in the last argument if it's present.
@@ -610,8 +608,9 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                                 numPosArgs--;
 
                                 // skip inlining the kwargs if there are any non-key/value pairs present
-                                if (absl::c_all_of(hash->pairs,
-                                                    [](auto &arg) { return parser::isa_node<parser::Pair>(arg.get()); })) {
+                                if (absl::c_all_of(hash->pairs, [](auto &arg) {
+                                        return parser::isa_node<parser::Pair>(arg.get());
+                                    })) {
                                     // hold a reference to the node, and remove it from the back fo the send list
                                     auto node = std::move(send->args.back());
                                     send->args.pop_back();
@@ -626,7 +625,6 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                                             },
                                             [&](parser::Node *node) { Exception::raise("Unhandled case"); });
                                     }
-
                                 }
                             }
                         }

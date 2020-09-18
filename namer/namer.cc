@@ -560,7 +560,6 @@ public:
         }
 
         if (!send->args.empty()) {
-
             // If there are positional arguments, there might be a variance annotation
             if (send->numPosArgs > 0) {
                 auto *lit = ast::cast_tree_const<ast::Literal>(send->args[0]);
@@ -575,7 +574,7 @@ public:
                 end -= 1;
             }
 
-            // Walk over the 
+            // Walk over the
             for (auto i = send->numPosArgs; i < end; i += 2) {
                 auto *key = ast::cast_tree_const<ast::Literal>(send->args[i]);
                 core::NameRef name;
@@ -1670,7 +1669,6 @@ public:
                     }
                 }
             }
-
         }
 
         return tree;

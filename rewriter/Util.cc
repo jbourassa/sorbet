@@ -184,10 +184,10 @@ ast::TreePtr ASTUtil::mkKwArgsHash(const ast::Send *send) {
     ast::Hash::ENTRY_store keys;
     ast::Hash::ENTRY_store values;
 
-    auto [kwStart,kwEnd] = send->kwArgsRange();
+    auto [kwStart, kwEnd] = send->kwArgsRange();
     for (auto i = kwStart; i < kwEnd; i += 2) {
         keys.emplace_back(send->args[i].deepCopy());
-        values.emplace_back(send->args[i+1].deepCopy());
+        values.emplace_back(send->args[i + 1].deepCopy());
     }
 
     return ast::MK::Hash(send->loc, std::move(keys), std::move(values));
