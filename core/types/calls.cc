@@ -1462,15 +1462,30 @@ class Magic_callWithSplat : public IntrinsicMethod {
     friend class Magic_callWithSplatAndBlock;
 
 private:
-    static InlinedVector<const TypeAndOrigins *, 2>
-    generateSendArgs(TupleType *tuple, InlinedVector<TypeAndOrigins, 2> &sendArgStore, Loc argsLoc) {
-        sendArgStore.reserve(tuple->elems.size());
-        for (auto &arg : tuple->elems) {
+    static InlinedVector<const TypeAndOrigins *, 2> generateSendArgs(TupleType *posTuple, TupleType *kwTuple,
+                                                                     InlinedVector<TypeAndOrigins, 2> &sendArgStore,
+                                                                     Loc argsLoc) {
+        auto numKwArgs = kwTuple != nullptr ? kwTuple->elems.size() : 0;
+
+        sendArgStore.reserve(posTuple->elems.size() + numKwArgs);
+
+        for (auto &arg : posTuple->elems) {
             TypeAndOrigins tao;
             tao.type = arg;
             tao.origins.emplace_back(argsLoc);
             sendArgStore.emplace_back(std::move(tao));
         }
+
+        // kwTuple is a nullptr when there are no keyword args present
+        if (kwTuple != nullptr) {
+            for (auto &arg : kwTuple->elems) {
+                TypeAndOrigins tao;
+                tao.type = arg;
+                tao.origins.emplace_back(argsLoc);
+                sendArgStore.emplace_back(std::move(tao));
+            }
+        }
+
         InlinedVector<const TypeAndOrigins *, 2> sendArgs;
         sendArgs.reserve(sendArgStore.size());
         for (auto &arg : sendArgStore) {
@@ -1480,18 +1495,12 @@ private:
         return sendArgs;
     }
 
-    static u1 getNumPosArgs(LiteralType *lit) {
-        ENFORCE(lit != nullptr);
-        ENFORCE(lit->literalKind == LiteralType::LiteralTypeKind::Integer);
-        return lit->value;
-    }
-
 public:
     void apply(const GlobalState &gs, DispatchArgs args, const Type *thisType, DispatchResult &res) const override {
         // args[0] is the receiver
         // args[1] is the method
-        // args[2] is the number of positional arguments
-        // args[3] are the splat arguments
+        // args[2] are the splat arguments
+        // args[3] are the keyword args
 
         if (args.args.size() != 4) {
             return;
@@ -1511,25 +1520,35 @@ public:
             return;
         }
         NameRef fn(gs, (u4)lit->value);
-        if (args.args[3]->type->isUntyped()) {
-            res.returnType = args.args[3]->type;
+        if (args.args[2]->type->isUntyped()) {
+            res.returnType = args.args[2]->type;
             return;
         }
-        auto *tuple = cast_type<TupleType>(args.args[3]->type.get());
-        if (tuple == nullptr) {
+        auto *posTuple = cast_type<TupleType>(args.args[2]->type.get());
+        if (posTuple == nullptr) {
             if (auto e =
-                    gs.beginError(core::Loc(args.locs.file, args.locs.args[3]), core::errors::Infer::UntypedSplat)) {
+                    gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
                 e.setHeader("Splats are only supported where the size of the array is known statically");
             }
             return;
         }
 
-        auto numPosArgs = getNumPosArgs(cast_type<core::LiteralType>(args.args[2]->type.get()));
+        auto kwArgsType = args.args[3]->type.get();
+        auto *kwTuple = cast_type<TupleType>(kwArgsType);
+        if (kwTuple == nullptr && !kwArgsType->isNilClass()) {
+            if (auto e =
+                    gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
+                e.setHeader("Keyword args with splats are only supported where the shape of the hash is known statically");
+            }
+            return;
+        }
+
+        u1 numPosArgs = posTuple->elems.size();
 
         InlinedVector<TypeAndOrigins, 2> sendArgStore;
-        InlinedVector<const TypeAndOrigins *, 2> sendArgs =
-            Magic_callWithSplat::generateSendArgs(tuple, sendArgStore, core::Loc(args.locs.file, args.locs.args[3]));
-        InlinedVector<LocOffsets, 2> sendArgLocs(tuple->elems.size(), args.locs.args[3]);
+        InlinedVector<const TypeAndOrigins *, 2> sendArgs = Magic_callWithSplat::generateSendArgs(
+            posTuple, kwTuple, sendArgStore, core::Loc(args.locs.file, args.locs.args[2]));
+        InlinedVector<LocOffsets, 2> sendArgLocs(sendArgs.size(), args.locs.args[2]);
         CallLocs sendLocs{args.locs.file, args.locs.call, args.locs.args[0], sendArgLocs};
         DispatchArgs innerArgs{fn, sendLocs, numPosArgs, sendArgs, receiver->type, receiver->type, args.block};
         auto dispatched = receiver->type->dispatchCall(gs, innerArgs);
@@ -1770,7 +1789,7 @@ public:
     void apply(const GlobalState &gs, DispatchArgs args, const Type *thisType, DispatchResult &res) const override {
         // args[0] is the receiver
         // args[1] is the method
-        // args[2] is the number of positional arguments
+        // args[2] are the splat arguments
         // args[3] are the splat arguments
         // args[4] is the block
 
@@ -1793,15 +1812,27 @@ public:
         }
         NameRef fn(gs, (u4)lit->value);
 
-        if (args.args[3]->type->isUntyped()) {
-            res.returnType = args.args[3]->type;
+        if (args.args[2]->type->isUntyped()) {
+            res.returnType = args.args[2]->type;
             return;
         }
-        auto *tuple = cast_type<TupleType>(args.args[3]->type.get());
-        if (tuple == nullptr) {
+        auto *posTuple = cast_type<TupleType>(args.args[2]->type.get());
+        if (posTuple == nullptr) {
             if (auto e =
                     gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
                 e.setHeader("Splats are only supported where the size of the array is known statically");
+            }
+            return;
+        }
+
+        u1 numPosArgs = posTuple->elems.size();
+
+        auto kwType = args.args[3]->type.get();
+        auto *kwTuple = cast_type<TupleType>(kwType);
+        if (kwTuple == nullptr && !kwType->isNilClass()) {
+            if (auto e =
+                    gs.beginError(core::Loc(args.locs.file, args.locs.args[2]), core::errors::Infer::UntypedSplat)) {
+                e.setHeader("Keyword args with splats are only supported where the shape of the hash is known statically");
             }
             return;
         }
@@ -1814,12 +1845,10 @@ public:
             return;
         }
 
-        auto numPosArgs = Magic_callWithSplat::getNumPosArgs(cast_type<core::LiteralType>(args.args[2]->type.get()));
-
         InlinedVector<TypeAndOrigins, 2> sendArgStore;
-        InlinedVector<const TypeAndOrigins *, 2> sendArgs =
-            Magic_callWithSplat::generateSendArgs(tuple, sendArgStore, core::Loc(args.locs.file, args.locs.args[3]));
-        InlinedVector<LocOffsets, 2> sendArgLocs(tuple->elems.size(), args.locs.args[3]);
+        InlinedVector<const TypeAndOrigins *, 2> sendArgs = Magic_callWithSplat::generateSendArgs(
+            posTuple, kwTuple, sendArgStore, core::Loc(args.locs.file, args.locs.args[2]));
+        InlinedVector<LocOffsets, 2> sendArgLocs(sendArgs.size(), args.locs.args[2]);
         CallLocs sendLocs{args.locs.file, args.locs.call, args.locs.args[0], sendArgLocs};
 
         TypePtr finalBlockType =

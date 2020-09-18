@@ -511,32 +511,51 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     flags.isPrivateOk = true;
                 }
 
-                int numPosArgs = send->args.size();
-                if (numPosArgs > 0) {
-                    // Deconstruct the kwargs hash in the last argument if it's present.
-                    if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
-                        if (hash->kwargs) {
-                            numPosArgs -= 1;
+                if (absl::c_any_of(send->args, [](auto &arg) { return parser::isa_node<parser::Splat>(arg.get()); })) {
 
-                            auto node = std::move(send->args.back());
-                            send->args.pop_back();
+                    // Build up an array that represents the keyword args for the send. When there is a Kwsplat, treat
+                    // all keyword arguments as a single argument.
+                    unique_ptr<parser::Node> kwArray;
+                    if (!send->args.empty()) {
+                        // Deconstruct the kwargs hash in the last argument if it's present.
+                        if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
+                            if (hash->kwargs) {
+                                // hold a reference to the node, and remove it from the back fo the send list
+                                auto node = std::move(send->args.back());
+                                send->args.pop_back();
 
-                            // inline the hash into the
-                            for (auto &entry : hash->pairs) {
-                                typecase(
-                                    entry.get(),
-                                    [&](parser::Pair *pair) {
-                                        send->args.emplace_back(std::move(pair->key));
-                                        send->args.emplace_back(std::move(pair->value));
-                                    },
-                                    [&](parser::Kwsplat *kwsplat) { send->args.emplace_back(std::move(kwsplat->expr)); },
-                                    [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                                parser::NodeVec elts;
+
+                                // skip inlining the kwargs if there are any non-key/value pairs present
+                                if (absl::c_any_of(hash->pairs,
+                                                    [](auto &arg) { return !parser::isa_node<parser::Pair>(arg.get()); })) {
+                                    elts.emplace_back(std::move(node));
+                                } else {
+
+                                    // inline the hash into the send args
+                                    for (auto &entry : hash->pairs) {
+                                        typecase(
+                                            entry.get(),
+                                            [&](parser::Pair *pair) {
+                                                elts.emplace_back(std::move(pair->key));
+                                                elts.emplace_back(std::move(pair->value));
+                                            },
+                                            [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                                    }
+                                }
+
+                                kwArray = make_unique<parser::Array>(loc, std::move(elts));
                             }
                         }
                     }
-                }
 
-                if (absl::c_any_of(send->args, [](auto &arg) { return parser::isa_node<parser::Splat>(arg.get()); })) {
+                    // If the kwargs hash is not present, make a `nil` to put in the place of that argument. This
+                    // will be used in the implementation of the intrinsic to tell the difference between keyword
+                    // args, keyword args with kw splats, and no keyword args at all.
+                    if (kwArray == nullptr) {
+                        kwArray = make_unique<parser::Nil>(loc);
+                    }
+
                     // If we have a splat anywhere in the argument list, desugar
                     // the argument list as a single Array node, and then
                     // synthesize a call to
@@ -551,25 +570,23 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                         auto *bp = parser::cast_node<parser::BlockPass>(it->get());
                         block = std::move(bp->block);
                         argnodes.erase(it);
-
-                        // decrement the number of positional args, as we don't count the block
-                        numPosArgs--;
                     }
 
                     auto array = make_unique<parser::Array>(loc, std::move(argnodes));
                     auto args = node2TreeImpl(dctx, std::move(array));
+                    auto kwargs = node2TreeImpl(dctx, std::move(kwArray));
                     auto method =
                         MK::Literal(loc, core::make_type<core::LiteralType>(core::Symbols::Symbol(), send->method));
 
                     Send::ARGS_store sendargs;
                     sendargs.emplace_back(std::move(rec));
                     sendargs.emplace_back(std::move(method));
-                    sendargs.emplace_back(MK::Int(loc, numPosArgs));
                     sendargs.emplace_back(std::move(args));
+                    sendargs.emplace_back(std::move(kwargs));
                     TreePtr res;
                     if (block == nullptr) {
                         res = MK::Send(loc, MK::Constant(loc, core::Symbols::Magic()), core::Names::callWithSplat(),
-                                       numPosArgs, std::move(sendargs), {});
+                                       4, std::move(sendargs), {});
                     } else {
                         auto convertedBlock = node2TreeImpl(dctx, std::move(block));
                         Literal *lit;
@@ -584,6 +601,37 @@ TreePtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) {
                     }
                     result = std::move(res);
                 } else {
+
+                    int numPosArgs = send->args.size();
+                    if (numPosArgs > 0) {
+                        // Deconstruct the kwargs hash in the last argument if it's present.
+                        if (auto *hash = parser::cast_node<parser::Hash>(send->args.back().get())) {
+                            if (hash->kwargs) {
+                                numPosArgs--;
+
+                                // skip inlining the kwargs if there are any non-key/value pairs present
+                                if (absl::c_all_of(hash->pairs,
+                                                    [](auto &arg) { return parser::isa_node<parser::Pair>(arg.get()); })) {
+                                    // hold a reference to the node, and remove it from the back fo the send list
+                                    auto node = std::move(send->args.back());
+                                    send->args.pop_back();
+
+                                    // inline the hash into the send args
+                                    for (auto &entry : hash->pairs) {
+                                        typecase(
+                                            entry.get(),
+                                            [&](parser::Pair *pair) {
+                                                send->args.emplace_back(std::move(pair->key));
+                                                send->args.emplace_back(std::move(pair->value));
+                                            },
+                                            [&](parser::Node *node) { Exception::raise("Unhandled case"); });
+                                    }
+
+                                }
+                            }
+                        }
+                    }
+
                     Send::ARGS_store args;
                     unique_ptr<parser::Node> block;
                     args.reserve(send->args.size());
